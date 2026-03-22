@@ -1,6 +1,9 @@
 # 生成ファイル
 report.html
 
+# ポートフォリオ情報（非公開）
+code.csv
+
 # Python
 __pycache__/
 *.py[cod]
