@@ -193,6 +193,7 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
     """Yahoo Finance Japanライクなチャート
     上段(75%): ローソク足 + 移動平均線(5/25/75日) + 参照ライン
     下段(25%): 出来高バー
+    x軸を日付文字列カテゴリにすることでタイムゾーン問題・週末ギャップを完全排除
     """
     symbol = stock["symbol"]
     acq    = stock["acquisition_price"]
@@ -200,22 +201,26 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
     danger = acq * (2 / 3)
     is_jp  = stock["market"] == "日本"
 
-    # ── 色設定 ──
-    # 日本式: 陽線=赤, 陰線=青 / 米国式: 陽線=緑, 陰線=赤
+    # ── 色設定（日本: 陽線=赤/陰線=青, 米国: 陽線=緑/陰線=赤） ──
     if is_jp:
         up_c, dn_c = "#d32f2f", "#1565c0"
-        ma_colors  = {"移5日": "#e040fb", "移25日": "#00c853", "移75日": "#ffd600"}
     else:
         up_c, dn_c = "#26a69a", "#ef5350"
-        ma_colors  = {"移5日": "#e040fb", "移25日": "#00c853", "移75日": "#ffd600"}
+    ma_colors = {"移5日": "#e040fb", "移25日": "#00c853", "移75日": "#ffd600"}
 
     vol_colors = [up_c if c >= o else dn_c
                   for c, o in zip(hist["Close"], hist["Open"])]
 
+    # ── x軸を日付文字列に変換（タイムゾーン・週末ギャップ問題を完全回避） ──
+    idx = hist.index
+    if hasattr(idx, "tz") and idx.tz is not None:
+        idx = idx.tz_localize(None)
+    x = idx.strftime("%Y/%m/%d").tolist()
+
     # ── 移動平均 ──
-    ma5  = hist["Close"].rolling(5).mean()
-    ma25 = hist["Close"].rolling(25).mean()
-    ma75 = hist["Close"].rolling(75).mean()
+    ma5  = hist["Close"].rolling(5).mean().values
+    ma25 = hist["Close"].rolling(25).mean().values
+    ma75 = hist["Close"].rolling(75).mean().values
 
     # ── サブプロット ──
     fig = make_subplots(
@@ -227,7 +232,7 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
 
     # ── ローソク足 ──
     fig.add_trace(go.Candlestick(
-        x=hist.index,
+        x=x,
         open=hist["Open"].values,
         high=hist["High"].values,
         low=hist["Low"].values,
@@ -236,7 +241,7 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
         increasing=dict(line=dict(color=up_c, width=1), fillcolor=up_c),
         decreasing=dict(line=dict(color=dn_c, width=1), fillcolor=dn_c),
         hovertemplate=(
-            "<b>%{x|%Y/%m/%d}</b><br>"
+            "<b>%{x}</b><br>"
             "始値: %{open:,.0f}<br>"
             "高値: %{high:,.0f}<br>"
             "安値: %{low:,.0f}<br>"
@@ -248,7 +253,7 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
     # ── 移動平均線 ──
     for name, data in [("移5日", ma5), ("移25日", ma25), ("移75日", ma75)]:
         fig.add_trace(go.Scatter(
-            x=hist.index, y=data.values,
+            x=x, y=data,
             name=name, mode="lines",
             line=dict(color=ma_colors[name], width=1.2),
             hovertemplate=f"{name}: %{{y:,.0f}}<extra></extra>",
@@ -256,7 +261,7 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
 
     # ── 出来高 ──
     fig.add_trace(go.Bar(
-        x=hist.index,
+        x=x,
         y=hist["Volume"].values,
         name="出来高",
         marker_color=vol_colors,
@@ -296,9 +301,10 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
         xaxis_rangeslider_visible=False,
     )
 
-    # 週末ギャップ除去・グリッド設定
+    # カテゴリ軸（文字列日付）で週末ギャップなし・グリッド設定
     fig.update_xaxes(
-        rangebreaks=[dict(bounds=["sat", "mon"])],
+        type="category",
+        nticks=8,
         gridcolor="rgba(255,255,255,0.08)",
         showgrid=True,
         rangeslider_visible=False,
