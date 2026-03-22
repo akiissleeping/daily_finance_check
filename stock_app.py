@@ -191,6 +191,12 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
     target = stock["target_price"]
     danger = acq * (2 / 3)
 
+    # 期間の最高値・最安値
+    period_high = float(hist["High"].max())
+    period_low  = float(hist["Low"].min())
+    high_date   = hist["High"].idxmax().strftime("%m/%d")
+    low_date    = hist["Low"].idxmin().strftime("%m/%d")
+
     fig = go.Figure()
 
     fig.add_trace(go.Candlestick(
@@ -202,7 +208,31 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
         name=symbol,
         increasing_line_color="#26a69a",
         decreasing_line_color="#ef5350",
+        whiskerwidth=0.5,
+        hovertemplate=(
+            "<b>%{x|%Y/%m/%d}</b><br>"
+            "始値: %{open:,.0f}<br>"
+            "<span style='color:#ef9a9a'>高値: %{high:,.0f}</span><br>"
+            "<span style='color:#80cbc4'>安値: %{low:,.0f}</span><br>"
+            "終値: %{close:,.0f}"
+            "<extra></extra>"
+        ),
     ))
+
+    # 期間高値ライン
+    fig.add_hline(
+        y=period_high, line_dash="dot", line_color="#64b5f6", line_width=1.5,
+        annotation_text=f"期間高値 {period_high:,.0f}（{high_date}）",
+        annotation_font=dict(color="#64b5f6", size=10),
+        annotation_position="top right",
+    )
+    # 期間安値ライン
+    fig.add_hline(
+        y=period_low, line_dash="dot", line_color="#ce93d8", line_width=1.5,
+        annotation_text=f"期間安値 {period_low:,.0f}（{low_date}）",
+        annotation_font=dict(color="#ce93d8", size=10),
+        annotation_position="bottom right",
+    )
 
     # 参照ライン
     fig.add_hline(
@@ -215,7 +245,7 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
         y=acq, line_dash="dot", line_color="#ffa726", line_width=2,
         annotation_text=f"取得 {acq:,.0f}",
         annotation_font=dict(color="#ffa726", size=11),
-        annotation_position="top right",
+        annotation_position="bottom left",
     )
     fig.add_hline(
         y=danger, line_dash="dash", line_color="#ef5350", line_width=2,
@@ -225,15 +255,16 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
     )
 
     fig.update_layout(
-        height=380,
+        height=420,
         xaxis_rangeslider_visible=False,
         template="plotly_dark",
         paper_bgcolor="rgba(18,18,30,0)",
         plot_bgcolor="rgba(18,18,30,0)",
-        margin=dict(l=60, r=80, t=30, b=30),
+        margin=dict(l=60, r=160, t=30, b=30),
         xaxis=dict(gridcolor="rgba(255,255,255,0.08)", showgrid=True),
         yaxis=dict(gridcolor="rgba(255,255,255,0.08)", showgrid=True),
         showlegend=False,
+        hoverlabel=dict(bgcolor="#1e1e35", bordercolor="#2a2a50", font_size=12),
     )
 
     return pio.to_html(fig, include_plotlyjs=False, full_html=False)
