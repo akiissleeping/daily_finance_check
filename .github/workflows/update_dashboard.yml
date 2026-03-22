@@ -1,0 +1,59 @@
+name: 株価ダッシュボード更新
+
+on:
+  schedule:
+    - cron: '0 0 * * 1-5'   # 平日 JST 9:00 (= UTC 00:00)
+  workflow_dispatch:          # GitHub UI から手動実行も可能
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 依存パッケージインストール
+        run: pip install -r requirements.txt
+
+      - name: ポートフォリオCSV作成（Secret から復元）
+        run: echo "$PORTFOLIO_CSV" > code.csv
+        env:
+          PORTFOLIO_CSV: ${{ secrets.PORTFOLIO_CSV }}
+
+      - name: ダッシュボード生成
+        run: python stock_app.py --no-browser
+        env:
+          CI: true
+
+      - name: デプロイ用ディレクトリ準備
+        run: |
+          mkdir -p _site
+          cp report.html _site/index.html
+
+      - name: Pages アーティファクトアップロード
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
+
+      - name: GitHub Pages デプロイ
+        id: deployment
+        uses: actions/deploy-pages@v4

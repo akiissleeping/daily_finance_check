@@ -1,5 +1,6 @@
 # 生成ファイル
 report.html
+_site/
 
 # ポートフォリオ情報（非公開）
 code.csv

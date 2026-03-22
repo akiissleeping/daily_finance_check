@@ -585,7 +585,7 @@ def generate_html(portfolio_data: list,
 
 # ── メイン処理 ──────────────────────────────────────────────────────────────────
 
-def main():
+def main(open_browser: bool = True):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print("=" * 56)
     print("  株価ダッシュボード 起動")
@@ -656,10 +656,17 @@ def main():
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(html)
 
-    print("[OK] 完了! ブラウザで開きます...")
-    webbrowser.open(OUTPUT_FILE.as_uri())
+    if open_browser:
+        print("[OK] 完了! ブラウザで開きます...")
+        webbrowser.open(OUTPUT_FILE.as_uri())
+    else:
+        print("[OK] 完了!")
     print("=" * 56)
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-browser", action="store_true", help="ブラウザを自動で開かない")
+    args = parser.parse_args()
+    main(open_browser=not args.no_browser)
