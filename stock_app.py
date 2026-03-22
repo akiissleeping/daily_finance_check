@@ -10,7 +10,7 @@ import json
 import os
 import sys
 import webbrowser
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 try:
@@ -62,10 +62,12 @@ def load_portfolio() -> list:
 # ── 株価データ取得 ──────────────────────────────────────────────────────────────
 
 def fetch_stock_data(symbol: str) -> dict:
-    """3か月の株価履歴と現在情報を取得"""
+    """最新日から過去3か月の株価履歴を取得"""
     try:
         ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="3mo")
+        end_date   = pd.Timestamp.today().normalize()
+        start_date = end_date - pd.DateOffset(months=3)
+        hist = ticker.history(start=start_date, end=end_date + pd.Timedelta(days=1))
         if hist.empty:
             print(f"  [警告] {symbol}: データが取得できませんでした")
             return {"error": "データなし", "history": pd.DataFrame()}
@@ -254,6 +256,9 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
         annotation_position="bottom left",
     )
 
+    end_dt   = pd.Timestamp.today().normalize()
+    start_dt = end_dt - pd.DateOffset(months=3)
+
     fig.update_layout(
         height=420,
         xaxis_rangeslider_visible=False,
@@ -261,7 +266,10 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
         paper_bgcolor="rgba(18,18,30,0)",
         plot_bgcolor="rgba(18,18,30,0)",
         margin=dict(l=60, r=160, t=30, b=30),
-        xaxis=dict(gridcolor="rgba(255,255,255,0.08)", showgrid=True),
+        xaxis=dict(
+            range=[start_dt, end_dt],
+            gridcolor="rgba(255,255,255,0.08)", showgrid=True,
+        ),
         yaxis=dict(gridcolor="rgba(255,255,255,0.08)", showgrid=True),
         showlegend=False,
         hoverlabel=dict(bgcolor="#1e1e35", bordercolor="#2a2a50", font_size=12),
