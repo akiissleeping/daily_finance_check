@@ -69,6 +69,8 @@ def fetch_stock_data(symbol: str) -> dict:
         end_date   = pd.Timestamp.today().normalize()
         start_date = end_date - pd.DateOffset(months=3)
         hist = ticker.history(start=start_date, end=end_date + pd.Timedelta(days=1))
+        # タイムゾーンを除去（Plotlyとの型不一致を防ぐ）
+        hist.index = hist.index.tz_localize(None)
         if hist.empty:
             print(f"  [警告] {symbol}: データが取得できませんでした")
             return {"error": "データなし", "history": pd.DataFrame()}
@@ -188,50 +190,51 @@ def get_rankings_jp(count: int = 5) -> tuple:
 # ── チャート生成 ────────────────────────────────────────────────────────────────
 
 def create_chart(stock: dict, hist: pd.DataFrame) -> str:
-    """Yahoo Financeライクなチャートを生成
-    上段: ローソク足 + 移動平均線 + 参照ライン
-    下段: 出来高バー
+    """Yahoo Finance Japanライクなチャート
+    上段(75%): ローソク足 + 移動平均線(5/25/75日) + 参照ライン
+    下段(25%): 出来高バー
     """
     symbol = stock["symbol"]
     acq    = stock["acquisition_price"]
     target = stock["target_price"]
     danger = acq * (2 / 3)
+    is_jp  = stock["market"] == "日本"
 
-    # 期間高値・安値
-    period_high = float(hist["High"].max())
-    period_low  = float(hist["Low"].min())
-    high_date   = hist["High"].idxmax().strftime("%m/%d")
-    low_date    = hist["Low"].idxmin().strftime("%m/%d")
+    # ── 色設定 ──
+    # 日本式: 陽線=赤, 陰線=青 / 米国式: 陽線=緑, 陰線=赤
+    if is_jp:
+        up_c, dn_c = "#d32f2f", "#1565c0"
+        ma_colors  = {"移5日": "#e040fb", "移25日": "#00c853", "移75日": "#ffd600"}
+    else:
+        up_c, dn_c = "#26a69a", "#ef5350"
+        ma_colors  = {"移5日": "#e040fb", "移25日": "#00c853", "移75日": "#ffd600"}
 
-    # 移動平均線
+    vol_colors = [up_c if c >= o else dn_c
+                  for c, o in zip(hist["Close"], hist["Open"])]
+
+    # ── 移動平均 ──
     ma5  = hist["Close"].rolling(5).mean()
     ma25 = hist["Close"].rolling(25).mean()
+    ma75 = hist["Close"].rolling(75).mean()
 
-    # 出来高バーの色（陽線=緑、陰線=赤）
-    vol_colors = [
-        "#26a69a" if c >= o else "#ef5350"
-        for c, o in zip(hist["Close"], hist["Open"])
-    ]
-
-    # 上段70%: ローソク足、下段30%: 出来高
+    # ── サブプロット ──
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.02,
-        row_heights=[0.72, 0.28],
+        row_heights=[0.75, 0.25],
     )
 
     # ── ローソク足 ──
     fig.add_trace(go.Candlestick(
         x=hist.index,
-        open=hist["Open"],
-        high=hist["High"],
-        low=hist["Low"],
-        close=hist["Close"],
+        open=hist["Open"].values,
+        high=hist["High"].values,
+        low=hist["Low"].values,
+        close=hist["Close"].values,
         name="株価",
-        increasing_line_color="#26a69a",
-        decreasing_line_color="#ef5350",
-        whiskerwidth=0.6,
+        increasing=dict(line=dict(color=up_c, width=1), fillcolor=up_c),
+        decreasing=dict(line=dict(color=dn_c, width=1), fillcolor=dn_c),
         hovertemplate=(
             "<b>%{x|%Y/%m/%d}</b><br>"
             "始値: %{open:,.0f}<br>"
@@ -243,54 +246,46 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
     ), row=1, col=1)
 
     # ── 移動平均線 ──
-    fig.add_trace(go.Scatter(
-        x=hist.index, y=ma5,
-        name="MA5", mode="lines",
-        line=dict(color="#ffa726", width=1.2),
-        hovertemplate="MA5: %{y:,.0f}<extra></extra>",
-    ), row=1, col=1)
-    fig.add_trace(go.Scatter(
-        x=hist.index, y=ma25,
-        name="MA25", mode="lines",
-        line=dict(color="#42a5f5", width=1.2),
-        hovertemplate="MA25: %{y:,.0f}<extra></extra>",
-    ), row=1, col=1)
+    for name, data in [("移5日", ma5), ("移25日", ma25), ("移75日", ma75)]:
+        fig.add_trace(go.Scatter(
+            x=hist.index, y=data.values,
+            name=name, mode="lines",
+            line=dict(color=ma_colors[name], width=1.2),
+            hovertemplate=f"{name}: %{{y:,.0f}}<extra></extra>",
+        ), row=1, col=1)
 
     # ── 出来高 ──
     fig.add_trace(go.Bar(
-        x=hist.index, y=hist["Volume"],
+        x=hist.index,
+        y=hist["Volume"].values,
         name="出来高",
         marker_color=vol_colors,
-        opacity=0.75,
+        opacity=0.8,
+        showlegend=False,
         hovertemplate="出来高: %{y:,}<extra></extra>",
     ), row=2, col=1)
 
     # ── 参照ライン（上段のみ） ──
-    def hline(y, color, dash, label, pos):
+    for y_val, color, dash, label, pos in [
+        (target, "#00e676", "dash", f"目標 {target:,.0f}",  "top left"),
+        (acq,    "#ffa726", "dot",  f"取得 {acq:,.0f}",     "bottom left"),
+        (danger, "#ef5350", "dash", f"警戒 {danger:,.0f}",  "bottom left"),
+    ]:
         fig.add_hline(
-            y=y, line_dash=dash, line_color=color, line_width=1.5,
+            y=y_val, line_dash=dash, line_color=color, line_width=1.5,
             annotation_text=label,
             annotation_font=dict(color=color, size=10),
             annotation_position=pos,
             row=1, col=1,
         )
 
-    hline(period_high, "#64b5f6", "dot",  f"期間高値 {period_high:,.0f}（{high_date}）", "top right")
-    hline(period_low,  "#ce93d8", "dot",  f"期間安値 {period_low:,.0f}（{low_date}）",   "bottom right")
-    hline(target,      "#00e676", "dash", f"目標 {target:,.0f}",                         "top left")
-    hline(acq,         "#ffa726", "dot",  f"取得 {acq:,.0f}",                            "bottom left")
-    hline(danger,      "#ef5350", "dash", f"警戒 {danger:,.0f}",                         "bottom left")
-
     # ── レイアウト ──
-    end_dt   = pd.Timestamp.today().normalize()
-    start_dt = end_dt - pd.DateOffset(months=3)
-
     fig.update_layout(
         height=500,
         template="plotly_dark",
         paper_bgcolor="rgba(18,18,30,0)",
         plot_bgcolor="rgba(18,18,30,0)",
-        margin=dict(l=60, r=170, t=10, b=30),
+        margin=dict(l=60, r=110, t=20, b=30),
         showlegend=True,
         legend=dict(
             orientation="h", x=0, y=1.04,
@@ -298,17 +293,17 @@ def create_chart(stock: dict, hist: pd.DataFrame) -> str:
         ),
         hoverlabel=dict(bgcolor="#1e1e35", bordercolor="#2a2a50", font_size=12),
         hovermode="x",
+        xaxis_rangeslider_visible=False,
     )
 
-    # 週末・祝日を除外して Yahoo Finance に近いバー詰め表示
+    # 週末ギャップ除去・グリッド設定
     fig.update_xaxes(
-        range=[start_dt, end_dt],
         rangebreaks=[dict(bounds=["sat", "mon"])],
         gridcolor="rgba(255,255,255,0.08)",
+        showgrid=True,
         rangeslider_visible=False,
     )
-    fig.update_yaxes(gridcolor="rgba(255,255,255,0.08)")
-    # 出来高軸は短縮表記（例: 1.2M）
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.08)", showgrid=True)
     fig.update_yaxes(tickformat=".2s", row=2, col=1)
 
     return pio.to_html(fig, include_plotlyjs=False, full_html=False)
